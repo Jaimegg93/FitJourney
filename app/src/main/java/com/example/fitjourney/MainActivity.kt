@@ -88,6 +88,7 @@ class MainActivity : ComponentActivity() {
  *      • PantallaEstadisticas en la pestaña de estadísticas.
  *      • CalendarioPersonalizado en la pestaña de calendario.
  *      • Lista de plantillas (con opciones de edición/borrado) en la pestaña de rutinas.
+ *
  */
 @SuppressLint("UnrememberedMutableState")
 @OptIn(ExperimentalMaterial3Api::class)
