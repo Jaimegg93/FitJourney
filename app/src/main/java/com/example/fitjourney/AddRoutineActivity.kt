@@ -1,3 +1,5 @@
+// AddRoutineActivity.kt
+// Actividad para crear o editar rutinas de entrenamiento
 package com.example.fitjourney
 
 import android.os.Bundle
@@ -26,22 +28,29 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Icon
+
+/*
+ * - Si recibimos un extra "fecha", crearemos una rutina nueva para esa fecha (no plantilla).
+ * - Si recibimos un extra "routine_id", estamos en modo edición de plantilla o rutina existente.
+ */
 class AddRoutineActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-            super.onCreate(savedInstanceState)
+        super.onCreate(savedInstanceState)
+        val db = DBHelper(this)
+        val fechaAsignada = intent.getStringExtra("fecha")
+        val routineId = intent.getLongExtra("routine_id", -1L)
 
-            val db = DBHelper(this)
-            val fechaAsignada = intent.getStringExtra("fecha")
-            val routineId = intent.getLongExtra("routine_id", -1L)
-
+        // Si recibimos un ID válido, buscamos la rutina existente (sea plantilla o no)
         val rutinaExistente = if (routineId != -1L)
             db.getRoutines(plantillas = true).plus(db.getRoutines(plantillas = false)).find { it.id == routineId }
         else null
-        val ejerciciosExistentes = if (routineId != -1L) db.getExercisesForRoutine(routineId) else emptyList()
+        // Obtenemos sus ejercicios si existe
+        val ejerciciosExistentes = if (routineId != -1L) db.getEjerciciosPorRutina(routineId) else emptyList()
 
         setContent {
             FitJourneyTheme {
                 AddRoutineScreen(
+                    // Llamamos al Composable que dibuja la pantalla de formulario
                     nombreInicial = rutinaExistente?.nombre ?: "",
                     ejerciciosIniciales = ejerciciosExistentes.map {
                         ExerciseEntry(
@@ -53,23 +62,27 @@ class AddRoutineActivity : ComponentActivity() {
                     },
                     modoEdicion = routineId != -1L,
                     onSave = { nombreRutina, ejercicios ->
-
+                        // Tiene que haber al menos un ejercicio creado, con un nombre
                         if (ejercicios.isEmpty()) {
                             Toast.makeText(this, "Añade al menos un ejercicio", Toast.LENGTH_SHORT).show()
                             return@AddRoutineScreen
                         }
 
+                        // Determinamos si guardamos como plantilla (solo si no hay fecha)
                         val esPlantilla = fechaAsignada == null
                         val idFinal: Long
 
                         if (routineId == -1L) {
+                            // Creamos nueva rutina (plantilla o asignada a un día)
                             idFinal = db.insertRoutine(nombreRutina, esPlantilla = esPlantilla)
                         } else {
+                            // Actualizamos nombre de rutina existente
                             db.updateRoutineName(routineId, nombreRutina)
+                            // Borramos ejercicios anteriores para insertar los nuevos
                             db.deleteRoutineExercise(routineId)
                             idFinal = routineId
                         }
-
+                        // Insertamos cada ejercicio con su configuración
                         ejercicios.forEach { entry ->
                             val series = entry.series.toIntOrNull() ?: 0
                             val reps = entry.reps.toIntOrNull() ?: 0
@@ -77,10 +90,12 @@ class AddRoutineActivity : ComponentActivity() {
                             db.insertRoutineExercise(idFinal, entry.nombre, series, reps, peso)
                         }
 
+                        // Si es nueva rutina asociada a fecha, registramos en log de uso
                         if (routineId == -1L && fechaAsignada != null) {
                             db.logRoutine(fechaAsignada, idFinal)
                         }
 
+                        // Avisamos al usuario con toast y cerramos Activity con RESULT_OK
                         Toast.makeText(
                             this,
                             if (routineId == -1L) "Rutina guardada" else "Rutina actualizada",
@@ -100,6 +115,7 @@ class AddRoutineActivity : ComponentActivity() {
 
     }
 
+// Clase auxiliar para manejar los campos de cada ejercicio en el formulario
 class ExerciseEntry(
     nombre: String = "",
     series: String = "",
@@ -114,6 +130,16 @@ class ExerciseEntry(
     fun copy(): ExerciseEntry = ExerciseEntry(nombre, series, reps, peso)
 }
 
+/**
+ * Pantalla para crear o editar una rutina.
+ *
+ * @param onSave             Lambda que se invoca al pulsar "Guardar", recibe:
+ *                           - nombreRutina: String con el nombre ingresado.
+ *                           - ejercicios: List<ExerciseEntry> con todos los ejercicios añadidos.
+ * @param nombreInicial      Nombre de rutina si estamos editando; cadena vacía si estamos creando.
+ * @param ejerciciosIniciales Lista de ExerciseEntry preexistentes (en modo edición) o lista con un elemento vacía por defecto.
+ * @param modoEdicion        Boolean que indica si venimos a editar (true) o a crear (false).
+ */
 @Composable
 fun AddRoutineScreen(
     onSave: (String, List<ExerciseEntry>) -> Unit,
@@ -121,11 +147,12 @@ fun AddRoutineScreen(
     ejerciciosIniciales: List<ExerciseEntry> = listOf(ExerciseEntry()),
     modoEdicion: Boolean = false
 ) {
+    // Estado para el texto del nombre de la rutina
     var nombreRutina by remember { mutableStateOf(nombreInicial) }
-
-
+    // Lista mutable de ejercicios en el formulario
     val ejercicios = remember { mutableStateListOf<ExerciseEntry>() }
 
+    // Inicializamos ejercicios si venimos de edición, para mostrar toda la información ya existente
     LaunchedEffect(ejerciciosIniciales) {
         ejercicios.clear()
         ejercicios.addAll(ejerciciosIniciales.map { it.copy() })
@@ -141,7 +168,7 @@ fun AddRoutineScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(rememberScrollState()) // Permite scroll si hay muchos ejercicios
             .padding(16.dp)
     ) {
         Text(
@@ -149,7 +176,7 @@ fun AddRoutineScreen(
             color = MaterialTheme.colorScheme.primary,
             style = MaterialTheme.typography.headlineSmall
         )
-
+        // Campo de texto para el nombre de la rutina
         OutlinedTextField(
             value = nombreRutina,
             onValueChange = { nombreRutina = it },
@@ -164,7 +191,7 @@ fun AddRoutineScreen(
         )
 
         Spacer(modifier = Modifier.height(16.dp))
-
+        // Para cada ejercicio en la lista, mostramos los campos y botón de eliminar
         ejercicios.forEachIndexed { idx, entry ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -184,7 +211,7 @@ fun AddRoutineScreen(
                     )
                 }
             }
-
+            // Campo para nombre de ejercicio
             OutlinedTextField(
                 value = entry.nombre,
                 onValueChange = { entry.nombre = it },
@@ -197,6 +224,7 @@ fun AddRoutineScreen(
                     cursorColor = MaterialTheme.colorScheme.primary
                 )
             )
+            // Campo para series
             OutlinedTextField(
                 value = entry.series,
                 onValueChange = { entry.series = it },
@@ -209,6 +237,7 @@ fun AddRoutineScreen(
                     cursorColor = MaterialTheme.colorScheme.primary
                 )
             )
+            // Campo para repeticiones
             OutlinedTextField(
                 value = entry.reps,
                 onValueChange = { entry.reps = it },
@@ -221,6 +250,7 @@ fun AddRoutineScreen(
                     cursorColor = MaterialTheme.colorScheme.primary
                 )
             )
+            // Campo para peso
             OutlinedTextField(
                 value = entry.peso,
                 onValueChange = { entry.peso = it },
@@ -235,7 +265,7 @@ fun AddRoutineScreen(
             )
             Spacer(modifier = Modifier.height(12.dp))
         }
-
+        // Botón para añadir un nuevo ejercicio al formulario
         Button(
             onClick = { ejercicios.add(ExerciseEntry()) },
             modifier = Modifier.align(Alignment.CenterHorizontally),
@@ -248,6 +278,7 @@ fun AddRoutineScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // Botón final para guardar; solo habilita onSave si nombre y ejercicios válidos
         Button(
             onClick = {
                 if (nombreRutina.isNotBlank() && ejercicios.all { it.nombre.isNotBlank() }) {
